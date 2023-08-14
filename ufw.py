@@ -1,55 +1,36 @@
-import copy
 import time
 import torch
 import argparse
 import bittensor as bt
 import subprocess
+from typing import List, Dict, Set
 
 # Function to resynchronize with the Bittensor metagraph
-def resync_metagraph():
+def resync_metagraph(netuids: List[int]) -> Dict[int, List['bt.NeuronInfoLite']]:
     bt.logging.info("resync_metagraph()")
-    
-    # Make a deep copy of the current metagraph
-    previous_metagraph = copy.deepcopy(metagraph)
-    
-    # Sync the local metagraph with the remote metagraph
-    metagraph.sync(subtensor=subtensor)
-    
-    # Check if the metagraph's axon info has changed since the last sync
-    metagraph_axon_info_updated = previous_metagraph.axons != metagraph.axons
-    
-    # Log a message if the metagraph has been updated
-    if metagraph_axon_info_updated:
-        bt.logging.info("Metagraph updated, re-syncing hotkeys")
+
+    new_neurons = {}
+    for netuid in netuids:
+        new_neurons[netuid] = subtensor.neurons_lite(netuid=netuid)
     
     bt.logging.info("Metagraph synced!")
 
-# Function to check the top 50 UIDs in the metagraph and extract their IPs
-def check_metagraph():
-    bt.logging.info("check_metagraph()")
+    return new_neurons
+
+# Function to get the IPs of any neurons that have vpermit = True
+def neurons_to_ips(all_neurons: Dict[int, List['bt.NeuronInfoLite']]) -> Set[str]:
+    bt.logging.info("neurons_to_ips()")
+
+    validator_ips = set()
+    for subnet_neurons in all_neurons.values():
+        for neuron in subnet_neurons:
+            if neuron.vpermit:
+                validator_ips.add(neuron.ip)
     
-    # Extract the indices of the top 50 stakes
-    indices = torch.topk(metagraph.stake, 50).indices
-    
-    # Extract the corresponding UIDs
-    uids_with_highest_stake = metagraph.uids[indices].tolist()
-    
-    # Extract the corresponding axons
-    axons = [metagraph.axons[uid] for uid in uids_with_highest_stake]
-    
-    # Extract the corresponding IPs
-    ips = [axon.ip for axon in axons]
-    
-    # Pair the UIDs with their IPs and remove duplicates
-    unique_ip_to_uid = {ip: uid for ip, uid in zip(ips, uids_with_highest_stake)}
-    ips = list(unique_ip_to_uid.keys())
-    
-    bt.logging.info(f"Top 50 uids: {uids_with_highest_stake}")
-    
-    return ips
+    return validator_ips
 
 # Function to whitelist IPs in UFW (Uncomplicated Firewall)
-def whitelist_ips_in_ufw(ips):
+def whitelist_ips_in_ufw(ips: List[str]):
     # Disable UFW
     stop_cmd = "sudo ufw disable"
     # Reset UFW
@@ -76,6 +57,7 @@ def whitelist_ips_in_ufw(ips):
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run firewall")
     parser.add_argument('--netuid', help='Machine to connect to', choices=[1, 11, 21], default=1)
+    parser.add_argument('--subtensor.chain_endpoint', dest='chain_endpoint', help='Subtensor node', type=str, required=False, default=None)
     
     args = parser.parse_args()
     return args
@@ -84,17 +66,19 @@ if __name__ == "__main__":
     # Parse command line arguments
     args = parse_arguments()
     # Connect to Bittensor network
-    subtensor = bt.subtensor(network="finney")
-    # Initialize metagraph with netuid
-    metagraph = subtensor.metagraph(netuid=args.netuid)
+    subtensor: 'bt.subtensor'
+    if args.chain_endpoint:
+        subtensor = bt.subtensor(network="finney", chain_endpoint=args.chain_endpoint)
+    else:
+        subtensor = bt.subtensor(network="finney")
 
     # Infinite loop to keep the metagraph synced and firewall updated
     while True:
         # Resync the metagraph
-        resync_metagraph()
-        
-        # Get the IPs of the top 50 validators
-        ips = check_metagraph()
+        neurons_dict = resync_metagraph(netuids = [args.netuid])
+
+        # Get the IPs of any neurons that have vpermit = True
+        ips = neurons_to_ips(neurons_dict)
         
         # Transform the IPs to a specific format
         ips = [ip.split(".")[0] + "." + ip.split(".")[1] + ".0.0" for ip in ips]
@@ -105,3 +89,5 @@ if __name__ == "__main__":
         # Wait for 100 blocks (approximately 1200 seconds or 20 minutes)
         bt.logging.info("Waiting for 100 blocks, sleeping")
         time.sleep(1200)
+
+
