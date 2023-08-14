@@ -22,10 +22,9 @@ def neurons_to_ips(all_neurons: Dict[int, List['bt.NeuronInfoLite']]) -> Set[str
     bt.logging.info("neurons_to_ips()")
 
     validator_ips = set()
-    for subnet_neurons in all_neurons.values():
-        for neuron in subnet_neurons:
-            if neuron.validator_permit:
-                validator_ips.add(neuron.axon_info.ip)
+    for _, subnet_neurons in all_neurons.items():
+        ips = [neuron.axon_info.ip for neuron in subnet_neurons if neuron.validator_permit]
+        validator_ips.update(set(ips))
     
     return validator_ips
 
@@ -56,7 +55,7 @@ def whitelist_ips_in_ufw(ips: List[str]):
 # Function to parse command line arguments
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run firewall")
-    parser.add_argument('--netuid', help='Machine to connect to', choices=[1, 11, 21], default=1, type=int)
+    parser.add_argument('--netuid', help='Machine to connect to', choices=[1, 11, 21], default=1, type=int, nargs='+')
     parser.add_argument('--subtensor.chain_endpoint', dest='chain_endpoint', help='Subtensor node', type=str, required=False, default=None)
     
     args = parser.parse_args()
@@ -75,7 +74,7 @@ if __name__ == "__main__":
     # Infinite loop to keep the metagraph synced and firewall updated
     while True:
         # Resync the metagraph
-        neurons_dict = resync_metagraph(netuids = [args.netuid])
+        neurons_dict = resync_metagraph(netuids = args.netuid)
 
         # Get the IPs of any neurons that have vpermit = True
         ips = neurons_to_ips(neurons_dict)
