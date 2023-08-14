@@ -24,7 +24,7 @@ def neurons_to_ips(all_neurons: Dict[int, List['bt.NeuronInfoLite']]) -> Set[str
     validator_ips = set()
     for subnet_neurons in all_neurons.values():
         for neuron in subnet_neurons:
-            if neuron.vpermit:
+            if neuron.validator_permit:
                 validator_ips.add(neuron.ip)
     
     return validator_ips
